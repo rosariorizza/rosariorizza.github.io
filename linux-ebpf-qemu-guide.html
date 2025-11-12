@@ -99,65 +99,323 @@ vanilla Linux kernel, create a minimal root filesystem with static
 BusyBox, and debug the eBPF subsystem using QEMU and GDB, without KVM
 acceleration.</p>
 <h1 id="prerequisites-and-setup">Prerequisites and Setup</h1>
-<p>Ensure the following tools are installed on your host:</p>
-<ul>
-<li><p><strong>Development:</strong> git, gcc, make, flex, bison,
-libncurses-dev, libssl-dev, bc, libelf-dev, clang, llvm</p></li>
-<li><p><strong>Emulation:</strong> qemu-system-x86_64</p></li>
-<li><p><strong>Sources:</strong> Linux kernel (e.g. 6.12), BusyBox,
-libbpf/bpftool</p></li>
-</ul>
-<h1 id="preparing-the-minimal-root-filesystem-initramfs">Preparing the
-Minimal Root Filesystem (Initramfs)</h1>
-<h2 id="compile-busybox-statically">Compile BusyBox Statically</h2>
-<div class="sourceCode" id="cb1" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> defconfig</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> menuconfig</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Enable: [*] Build BusyBox as a static binary (no shared libs)</span></span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span></span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> install</span></code></pre></div>
-<h2 id="create-initramfs-image">Create Initramfs Image</h2>
-<div class="sourceCode" id="cb2" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> initramfs</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> initramfs</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-pv</span> <span class="dt">{bin</span><span class="op">,</span><span class="dt">sbin</span><span class="op">,</span><span class="dt">etc</span><span class="op">,</span><span class="dt">proc</span><span class="op">,</span><span class="dt">sys</span><span class="op">,</span><span class="dt">usr/{bin</span><span class="op">,</span><span class="dt">sbin}}</span></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> <span class="at">-av</span> ../busybox-<span class="pp">*</span>/_install/<span class="pp">*</span> .</span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="at">-e</span> <span class="st">&#39;#!/bin/sh\nmount -t proc none /proc\nmount -t sysfs none /sys\nexec /bin/sh&#39;</span> <span class="op">&gt;</span> init</span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x init</span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> . <span class="at">-print0</span> <span class="kw">|</span> <span class="fu">cpio</span> <span class="at">--null</span> <span class="at">-ov</span> <span class="at">--format</span><span class="op">=</span>newc <span class="kw">|</span> <span class="fu">gzip</span> <span class="at">-9</span> <span class="op">&gt;</span> ../initramfs.cpio.gz</span></code></pre></div>
+<p>Before proceeding, make sure your Ubuntu or Debian system has all
+required tools installed. The following commands will install the
+necessary development dependencies, QEMU emulator, and helper
+utilities.</p>
+<div class="sourceCode" id="cb1" data-language="bash"
+data-caption="Install essential build tools and dependencies"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Update package lists</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt update</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Install build and development tools</span></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt install <span class="at">-y</span> <span class="dt">\</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    git gcc g++ make flex bison bc <span class="dt">\</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    libncurses-dev libssl-dev libelf-dev <span class="dt">\</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    clang llvm pahole dwarves</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Install QEMU for x86_64 emulation</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt install <span class="at">-y</span> qemu-system-x86</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: install additional tools for convenience</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> apt install <span class="at">-y</span> cpio gzip wget curl</span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="co"># Verify installation</span></span>
+<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a><span class="fu">gcc</span> <span class="at">--version</span></span>
+<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a><span class="ex">qemu-system-x86_64</span> <span class="at">--version</span></span>
+<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a><span class="ex">pahole</span> <span class="at">--version</span></span></code></pre></div>
+<p>Next, download the required source code:</p>
+<div class="sourceCode" id="cb2" data-language="bash"
+data-caption="Obtain Linux, BusyBox, and eBPF tool sources"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a workspace</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> ~/ebpf-lab <span class="kw">&amp;&amp;</span> <span class="bu">cd</span> ~/ebpf-lab</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Download Linux kernel 6.12 (replace with latest stable if needed)</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--branch</span> v6.12 <span class="at">--depth</span><span class="op">=</span>1 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-6.12</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Download BusyBox</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--depth</span><span class="op">=</span>1 https://git.busybox.net/busybox</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Download bpftool (part of kernel tools)</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--depth</span><span class="op">=</span>1 https://github.com/libbpf/bpftool.git</span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Optional: clone libbpf separately if you plan to build it statically</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--depth</span><span class="op">=</span>1 https://github.com/libbpf/libbpf.git</span></code></pre></div>
+<p>Once all repositories are cloned, you will have the following
+directory layout:</p>
+<pre><code>~/ebpf-lab/
+ ├── linux-6.12/
+ ├── busybox/
+ ├── bpftool/
+ └── libbpf/</code></pre>
 <h1 id="compiling-the-debug-enabled-kernel">Compiling the Debug-Enabled
 Kernel</h1>
-<div class="sourceCode" id="cb3" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> linux-6.12</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> defconfig</span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> menuconfig</span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Disable KASLR, enable DEBUG_INFO, enable BPF_SYSCALL</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> bzImage modules</span></code></pre></div>
-<h1 id="preparing-ebpf-tools-and-programs">Preparing eBPF Tools and
-Programs</h1>
+<p>This step builds a Linux 6.12 kernel preconfigured for eBPF
+development and in-depth debugging with GDB inside QEMU. Manually
+toggling dozens of flags in <code>menuconfig</code> is tedious, so we
+can programmatically adjust the configuration using the kernel’s
+<code>scripts/config</code> tool.</p>
+<p>Simply copy and paste the following block <strong>(including the
+curly braces)</strong> in your kernel source directory to apply all
+configuration changes at once:</p>
 <div class="sourceCode" id="cb4" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> tools/lib/bpf/</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> BUILD_STATIC_ONLY=y</span>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> linux-6.12</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> defconfig</span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> ../../bpf/bpftool/</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> LDFLAGS=<span class="st">&quot;-static&quot;</span></span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="fu">clang</span> <span class="at">-g</span> <span class="at">-target</span> bpf <span class="at">-D__TARGET_ARCH_x86</span> <span class="at">-c</span> bpf_prog.c <span class="at">-o</span> bpf_prog.o</span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="fu">gcc</span> <span class="at">-Wall</span> <span class="at">-static</span> bpf_loader.c <span class="at">-o</span> bpf_loader <span class="at">-lbpf</span> <span class="at">-lz</span> <span class="at">-lelf</span></span></code></pre></div>
-<h1 id="debugging-with-qemu-and-gdb">Debugging with QEMU and GDB</h1>
-<h2 id="launch-qemu">Launch QEMU</h2>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Apply all eBPF + debug kernel options in one shot</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co"># (copy the entire block including the braces)</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># --- Enable core eBPF support ---</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_BPF_SYSCALL</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_BPF_JIT</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_BPF_JIT_DEFAULT_ON</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_BPF_LSM</span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_TASKS_TRACE_RCU</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_NET_DEVMEM</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_NETFILTER_BPF_LINK</span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_NET_SOCK_MSG</span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_PAGE_POOL</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_BPF_EVENTS</span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a><span class="co"># --- Enable debug symbols and BTF information ---</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_DEBUG_INFO</span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_DEBUG_INFO_NONE</span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_DEBUG_INFO_DWARF5</span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_DEBUG_INFO_REDUCED</span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_DEBUG_INFO_COMPRESSED_NONE</span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_DEBUG_INFO_COMPRESSED_ZLIB</span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_DEBUG_INFO_COMPRESSED_ZSTD</span>
+<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_DEBUG_INFO_SPLIT</span>
+<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_DEBUG_INFO_BTF</span>
+<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_DEBUG_INFO_BTF_MODULES</span>
+<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_PAHOLE_HAS_SPLIT_BTF</span>
+<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_PAHOLE_HAS_LANG_EXCLUDE</span>
+<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_GDB_SCRIPTS</span>
+<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--enable</span> CONFIG_PROBE_EVENTS_BTF_ARGS</span>
+<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a><span class="co"># --- Disable address randomization (KASLR and memory layout randomization) ---</span></span>
+<span id="cb4-36"><a href="#cb4-36" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_RANDOMIZE_BASE</span>
+<span id="cb4-37"><a href="#cb4-37" aria-hidden="true" tabindex="-1"></a><span class="ex">scripts/config</span> <span class="at">--disable</span> CONFIG_RANDOMIZE_MEMORY</span>
+<span id="cb4-38"><a href="#cb4-38" aria-hidden="true" tabindex="-1"></a><span class="kw">}</span></span>
+<span id="cb4-39"><a href="#cb4-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-40"><a href="#cb4-40" aria-hidden="true" tabindex="-1"></a><span class="co"># Regenerate configuration and build the kernel</span></span>
+<span id="cb4-41"><a href="#cb4-41" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> olddefconfig</span>
+<span id="cb4-42"><a href="#cb4-42" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> bzImage modules</span></code></pre></div>
+<h2 id="result">Result</h2>
+<p>After the build completes, you will have:</p>
+<ul>
+<li><p><code>arch/x86/boot/bzImage</code> — the bootable kernel
+image.</p></li>
+<li><p><code>vmlinux</code> — the uncompressed ELF image with full debug
+and BTF info.</p></li>
+</ul>
+<p>You can verify that BTF data was embedded successfully using:</p>
 <div class="sourceCode" id="cb5" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">qemu-system-x86_64</span> <span class="dt">\</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-kernel</span> arch/x86/boot/bzImage <span class="dt">\</span></span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-initrd</span> initramfs.cpio.gz <span class="dt">\</span></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-nographic</span> <span class="dt">\</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">-append</span> <span class="st">&quot;console=ttyS0&quot;</span> <span class="dt">\</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">-s</span> <span class="at">-S</span></span></code></pre></div>
-<h2 id="connect-gdb">Connect GDB</h2>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">file</span> vmlinux</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="co"># Expected output includes: &quot;BTF&quot; or &quot;with BTF type info&quot;</span></span></code></pre></div>
+<h1 id="preparing-the-minimal-root-filesystem-initramfs">Preparing the
+Minimal Root Filesystem (Initramfs)</h1>
+<p>In this step, we build a lightweight, static root filesystem based on
+<strong>BusyBox</strong>, which serves as the userland for our QEMU
+virtual machine. Using a static BusyBox binary avoids dynamic
+dependencies (e.g., glibc), making it ideal for minimal and portable
+kernel testing environments.</p>
+<h2 id="compile-busybox-statically">Compile BusyBox Statically</h2>
+<p>Instead of navigating through <code>menuconfig</code>, we can enable
+static linking directly by editing the BusyBox configuration file using
+<code>sed</code>. On modern Ubuntu/Debian systems, you must disable the
+<code>tc</code> (traffic control) applet to prevent build errors due to
+missing <code>libmnl</code>.</p>
 <div class="sourceCode" id="cb6" data-language="bash"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">gdb</span> vmlinux</span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="ex">target</span> remote :1234</span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="cf">break</span> <span class="ex">bpf_check</span></span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="cf">continue</span></span></code></pre></div>
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> busybox-<span class="pp">*</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Start from a default configuration</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> defconfig</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Enable static build (no menuconfig needed)</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="fu">sed</span> <span class="at">-i</span> <span class="st">&#39;s/# CONFIG_STATIC is not set/CONFIG_STATIC=y/&#39;</span> .config</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Disable tc applet to avoid dependency errors</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="fu">sed</span> <span class="at">-i</span> <span class="st">&#39;s/CONFIG_TC=y/# CONFIG_TC is not set/&#39;</span> .config <span class="dv">2</span><span class="op">&gt;</span>/dev/null <span class="kw">||</span> <span class="fu">true</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Build BusyBox statically</span></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Install into a temporary directory</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> install</span></code></pre></div>
+<h2 id="create-initramfs-image">Create Initramfs Image</h2>
+<p>We now create a minimal <strong>initramfs</strong> image containing
+BusyBox and a basic <code>init</code> script. This filesystem will be
+loaded entirely into memory at boot.</p>
+<div class="sourceCode" id="cb7" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Create root filesystem structure</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> initramfs</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> initramfs</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-pv</span> bin sbin etc proc sys usr/bin usr/sbin</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a><span class="co"># Copy BusyBox binaries and links</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> <span class="at">-av</span> ../busybox-<span class="pp">*</span>/_install/<span class="pp">*</span> .</span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a><span class="co"># Minimal init script</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> <span class="op">&lt;&lt; &#39;EOF&#39;</span> <span class="op">&gt;</span> init</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a><span class="st">#!/bin/sh</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a><span class="st">mount -t proc none /proc</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a><span class="st">mount -t sysfs none /sys</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a><span class="st">exec /bin/sh</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a><span class="op">EOF</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a><span class="fu">chmod</span> +x init</span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Package everything into a compressed initramfs</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> . <span class="at">-print0</span> <span class="kw">|</span> <span class="fu">cpio</span> <span class="at">--null</span> <span class="at">-ov</span> <span class="at">--format</span><span class="op">=</span>newc <span class="kw">|</span> <span class="fu">gzip</span> <span class="at">-9</span> <span class="op">&gt;</span> ../initramfs.cpio.gz</span></code></pre></div>
+<h1 id="setup-the-environment">Setup the Environment</h1>
+<p>This section guides you through verifying a minimal kernel, setting
+up a shared folder for host-guest communication, preparing the eBPF
+environment, and debugging programs using GDB and QEMU.</p>
+<h2 id="verify-kernel-boot">Verify Kernel Boot</h2>
+<p>Before doing anything else, ensure that your compiled kernel and
+initramfs boot correctly. Use a simple QEMU command
+<strong>without</strong> the <code>-S -s</code> flags:</p>
+<div class="sourceCode" id="cb8" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="ex">qemu-system-x86_64</span> <span class="dt">\</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-kernel</span> linux-6.12.57/arch/x86/boot/bzImage <span class="dt">\</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-initrd</span> initramfs.cpio.gz <span class="dt">\</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-nographic</span> <span class="dt">\</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">-append</span> <span class="st">&quot;console=ttyS0&quot;</span></span></code></pre></div>
+<p>Inside the VM, test basic commands:</p>
+<div class="sourceCode" id="cb9" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> /</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> /proc</span></code></pre></div>
+<p>Once the kernel is responsive and BusyBox works, proceed to the next
+step.</p>
+<p>—</p>
+<h2 id="setup-shared-folder-between-host-and-guest">Setup Shared Folder
+Between Host and Guest</h2>
+<p>Create a shared folder on the host (at the same level as
+kernel/initramfs):</p>
+<div class="sourceCode" id="cb10" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> shared</span></code></pre></div>
+<p>Launch QEMU with 9p shared folder support (without <code>-s -S</code>
+for now):</p>
+<div class="sourceCode" id="cb11" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">qemu-system-x86_64</span> <span class="dt">\</span></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-kernel</span> linux-6.12.57/arch/x86/boot/bzImage <span class="dt">\</span></span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-initrd</span> initramfs.cpio.gz <span class="dt">\</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-nographic</span> <span class="dt">\</span></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">-append</span> <span class="st">&quot;console=ttyS0&quot;</span> <span class="dt">\</span></span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">-virtfs</span> local,path=./shared,mount_tag=host0,security_model=passthrough,id=host0</span></code></pre></div>
+<p>Inside the VM, mount the shared folder:</p>
+<div class="sourceCode" id="cb12" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /mnt/host</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mount</span> <span class="at">-t</span> 9p <span class="at">-o</span> trans=virtio,version=9p2000.L host0 /mnt/host</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /mnt/host</span></code></pre></div>
+<p><strong>Note:</strong> This setup needs to be repeated after every
+guest reboot.</p>
+<p>—</p>
+<h2 id="prepare-ebpf-environment">Prepare eBPF Environment</h2>
+<h3 id="download-and-compile-libbpf-and-bpftool">Download and Compile
+libbpf and bpftool</h3>
+<p>On the host, clone repositories into the shared folder:</p>
+<div class="sourceCode" id="cb13" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> shared</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Clone libbpf standalone repository</span></span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone https://github.com/libbpf/libbpf.git</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> libbpf/src</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Compile libbpf statically</span></span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> BUILD_STATIC_ONLY=y</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Clone bpftool (recursive for submodules)</span></span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> ../..</span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="at">--recursive</span> https://github.com/libbpf/bpftool.git</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> bpftool/src</span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Compile bpftool statically linking libbpf</span></span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a><span class="fu">make</span> <span class="at">-j</span><span class="va">$(</span><span class="fu">nproc</span><span class="va">)</span> LIBSUBDIRS=<span class="st">&quot;tools/lib/bpf&quot;</span> LDFLAGS=<span class="st">&quot;-static&quot;</span></span></code></pre></div>
+<h3 id="generate-vmlinux.h-for-host-and-guest">Generate
+<code>vmlinux.h</code> for Host and Guest</h3>
+<p>On the <strong>host</strong>, generate the kernel BTF header:</p>
+<div class="sourceCode" id="cb14" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./bpftool/src/bpftool</span> btf dump file /sys/kernel/btf/vmlinux format c <span class="op">&gt;</span> vmlinux.h</span></code></pre></div>
+<p><strong>Important:</strong> On the guest, you must regenerate
+<code>vmlinux.h</code> using the <code>bpftool</code> compiled inside
+the shared folder:</p>
+<div class="sourceCode" id="cb15" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /mnt/host/bpftool/src</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./bpftool</span> btf dump file /sys/kernel/btf/vmlinux format c <span class="op">&gt;</span> ../vmlinux.h</span></code></pre></div>
+<p>This ensures the BTF header matches the running guest kernel.</p>
+<p>—</p>
+<h3 id="compile-minimal-bpf-program">Compile Minimal BPF Program</h3>
+<p>Create a minimal BPF program on the <strong>host</strong>:</p>
+<div class="sourceCode" id="cb16" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># minimal BPF program using bpf_printk</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="bu">echo</span> <span class="at">-e</span> <span class="st">&#39;#include &lt;bpf/bpf_helpers.h&gt;\nint dummy_prog(struct xdp_md *ctx) { bpf_printk(&quot;Hello\n&quot;); return 0; }&#39;</span> <span class="op">&gt;</span> test_prog.c</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Compile against vmlinux.h</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="fu">clang</span> <span class="at">-O2</span> <span class="at">-target</span> bpf <span class="at">-g</span> <span class="at">-I.</span> <span class="at">-c</span> test_prog.c <span class="at">-o</span> test_prog.o</span></code></pre></div>
+<p>Test loading with bpftool on the host:</p>
+<div class="sourceCode" id="cb17" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./bpftool/src/bpftool</span> prog load test_prog.o /dev/null</span></code></pre></div>
+<p><strong>Note:</strong> We deliberately omit the license to
+intentionally fail verification — this provides immediate feedback from
+the kernel.</p>
+<p>—</p>
+<h3 id="move-to-guest-and-verify-environment">Move to Guest and Verify
+Environment</h3>
+<p>After verifying on the host, copy all compiled programs and tools
+into the shared folder. Inside the guest:</p>
+<ol>
+<li><p>Mount the shared folder:</p>
+<div class="sourceCode" id="cb18" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /mnt/host</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mount</span> <span class="at">-t</span> 9p <span class="at">-o</span> trans=virtio,version=9p2000.L host0 /mnt/host</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /mnt/host</span></code></pre></div></li>
+<li><p><strong>Important:</strong> Regenerate <code>vmlinux.h</code>
+using the guest’s bpftool:</p>
+<div class="sourceCode" id="cb19" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> bpftool/src</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./bpftool</span> btf dump file /sys/kernel/btf/vmlinux format c <span class="op">&gt;</span> ../vmlinux.h</span></code></pre></div></li>
+<li><p><strong>Note:</strong> Verify that the kernel is responsive and
+basic commands work:</p>
+<div class="sourceCode" id="cb20" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> /</span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ls</span> /proc</span></code></pre></div></li>
+<li><p>Compile and test minimal BPF programs. Even if intentionally
+invalid (e.g., missing license), this ensures the verifier and loader
+are functional:</p>
+<div class="sourceCode" id="cb21" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">clang</span> <span class="at">-O2</span> <span class="at">-target</span> bpf <span class="at">-g</span> <span class="at">-I.</span> <span class="at">-c</span> test_prog.c <span class="at">-o</span> test_prog.o</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./bpftool/src/bpftool</span> prog load test_prog.o /dev/null</span></code></pre></div></li>
+<li><p><strong>Note:</strong> After each guest reboot, repeat the shared
+folder mounting and <code>vmlinux.h</code> regeneration before compiling
+or loading any BPF programs.</p></li>
+</ol>
+<h1 id="debugging-with-qemu-and-gdbtui">Debugging with QEMU and
+GDB/TUI</h1>
+<p>Once loading works on the host and guest:</p>
+<ol>
+<li><p>Launch QEMU with <code>-S</code> and shared folder support:</p>
+<div class="sourceCode" id="cb22" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">qemu-system-x86_64</span> <span class="dt">\</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-kernel</span> linux-6.12.57/arch/x86/boot/bzImage <span class="dt">\</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-initrd</span> initramfs.cpio.gz <span class="dt">\</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-nographic</span> <span class="dt">\</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">-append</span> <span class="st">&quot;console=ttyS0&quot;</span> <span class="dt">\</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">-s</span> <span class="at">-S</span> <span class="dt">\</span></span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">-virtfs</span> local,path=./shared,mount_tag=host0,security_model=passthrough,id=host0</span></code></pre></div></li>
+<li><p>Inside the VM, mount the shared folder:</p>
+<div class="sourceCode" id="cb23" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /mnt/host</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="fu">mount</span> <span class="at">-t</span> 9p <span class="at">-o</span> trans=virtio,version=9p2000.L host0 /mnt/host</span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> /mnt/host</span></code></pre></div></li>
+<li><p>Attach GDB from host, with TUI enabled:</p>
+<div class="sourceCode" id="cb24" data-language="bash"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="fu">gdb</span> <span class="at">-tui</span> vmlinux</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="ex">target</span> remote :1234</span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="cf">break</span> <span class="ex">bpf_check</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a><span class="kw">(</span><span class="fu">gdb</span><span class="kw">)</span> <span class="cf">continue</span></span></code></pre></div></li>
+<li><p>Step through BPF verification and kernel execution to inspect
+behavior.</p></li>
+</ol>
 </body>
 </html>

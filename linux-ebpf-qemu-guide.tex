@@ -29,73 +29,389 @@ create a minimal root filesystem with static BusyBox, and debug the eBPF subsyst
 using QEMU and GDB, without KVM acceleration.
 
 \section{Prerequisites and Setup}
-Ensure the following tools are installed on your host:
+
+Before proceeding, make sure your Ubuntu or Debian system has all required
+tools installed. The following commands will install the necessary development
+dependencies, QEMU emulator, and helper utilities.
+
+\begin{lstlisting}[language=bash,caption={Install essential build tools and dependencies}]
+# Update package lists
+sudo apt update
+
+# Install build and development tools
+sudo apt install -y \
+    git gcc g++ make flex bison bc \
+    libncurses-dev libssl-dev libelf-dev \
+    clang llvm pahole dwarves
+
+# Install QEMU for x86_64 emulation
+sudo apt install -y qemu-system-x86
+
+# Optional: install additional tools for convenience
+sudo apt install -y cpio gzip wget curl
+
+# Verify installation
+gcc --version
+qemu-system-x86_64 --version
+pahole --version
+\end{lstlisting}
+
+Next, download the required source code:
+
+\begin{lstlisting}[language=bash,caption={Obtain Linux, BusyBox, and eBPF tool sources}]
+# Create a workspace
+mkdir -p ~/ebpf-lab && cd ~/ebpf-lab
+
+# Download Linux kernel 6.12 (replace with latest stable if needed)
+git clone --branch v6.12 --depth=1 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git linux-6.12
+
+# Download BusyBox
+git clone --depth=1 https://git.busybox.net/busybox
+
+# Download bpftool (part of kernel tools)
+git clone --depth=1 https://github.com/libbpf/bpftool.git
+
+# Optional: clone libbpf separately if you plan to build it statically
+git clone --depth=1 https://github.com/libbpf/libbpf.git
+\end{lstlisting}
+
+Once all repositories are cloned, you will have the following directory layout:
+\begin{verbatim}
+~/ebpf-lab/
+ ├── linux-6.12/
+ ├── busybox/
+ ├── bpftool/
+ └── libbpf/
+\end{verbatim}
+
+\section{Compiling the Debug-Enabled Kernel}
+
+This step builds a Linux 6.12 kernel preconfigured for eBPF development and in-depth debugging with GDB inside QEMU.  
+Manually toggling dozens of flags in \texttt{menuconfig} is tedious, so we can programmatically adjust the configuration using the kernel’s \texttt{scripts/config} tool.
+
+Simply copy and paste the following block \textbf{(including the curly braces)} in your kernel source directory to apply all configuration changes at once:
+
+\begin{lstlisting}[language=bash]
+cd linux-6.12
+make defconfig
+
+# Apply all eBPF + debug kernel options in one shot
+# (copy the entire block including the braces)
+{
+# --- Enable core eBPF support ---
+scripts/config --enable CONFIG_BPF_SYSCALL
+scripts/config --enable CONFIG_BPF_JIT
+scripts/config --enable CONFIG_BPF_JIT_DEFAULT_ON
+scripts/config --enable CONFIG_BPF_LSM
+scripts/config --enable CONFIG_TASKS_TRACE_RCU
+scripts/config --enable CONFIG_NET_DEVMEM
+scripts/config --enable CONFIG_NETFILTER_BPF_LINK
+scripts/config --enable CONFIG_NET_SOCK_MSG
+scripts/config --enable CONFIG_PAGE_POOL
+scripts/config --enable CONFIG_BPF_EVENTS
+
+# --- Enable debug symbols and BTF information ---
+scripts/config --enable CONFIG_DEBUG_INFO
+scripts/config --disable CONFIG_DEBUG_INFO_NONE
+scripts/config --enable CONFIG_DEBUG_INFO_DWARF5
+scripts/config --disable CONFIG_DEBUG_INFO_REDUCED
+scripts/config --enable CONFIG_DEBUG_INFO_COMPRESSED_NONE
+scripts/config --disable CONFIG_DEBUG_INFO_COMPRESSED_ZLIB
+scripts/config --disable CONFIG_DEBUG_INFO_COMPRESSED_ZSTD
+scripts/config --disable CONFIG_DEBUG_INFO_SPLIT
+scripts/config --enable CONFIG_DEBUG_INFO_BTF
+scripts/config --enable CONFIG_DEBUG_INFO_BTF_MODULES
+scripts/config --enable CONFIG_PAHOLE_HAS_SPLIT_BTF
+scripts/config --enable CONFIG_PAHOLE_HAS_LANG_EXCLUDE
+scripts/config --enable CONFIG_GDB_SCRIPTS
+scripts/config --enable CONFIG_PROBE_EVENTS_BTF_ARGS
+
+# --- Disable address randomization (KASLR and memory layout randomization) ---
+scripts/config --disable CONFIG_RANDOMIZE_BASE
+scripts/config --disable CONFIG_RANDOMIZE_MEMORY
+}
+
+# Regenerate configuration and build the kernel
+make olddefconfig
+make -j$(nproc) bzImage modules
+\end{lstlisting}
+
+\subsection{Result}
+
+After the build completes, you will have:
 \begin{itemize}
-\item \textbf{Development:} git, gcc, make, flex, bison, libncurses-dev, libssl-dev, bc, libelf-dev, clang, llvm
-\item \textbf{Emulation:} qemu-system-x86\_64
-\item \textbf{Sources:} Linux kernel (e.g.\ 6.12), BusyBox, libbpf/bpftool
+\item \texttt{arch/x86/boot/bzImage} — the bootable kernel image.
+\item \texttt{vmlinux} — the uncompressed ELF image with full debug and BTF info.
 \end{itemize}
+
+You can verify that BTF data was embedded successfully using:
+\begin{lstlisting}[language=bash]
+file vmlinux
+# Expected output includes: "BTF" or "with BTF type info"
+\end{lstlisting}
 
 \section{Preparing the Minimal Root Filesystem (Initramfs)}
 
+In this step, we build a lightweight, static root filesystem based on \textbf{BusyBox}, 
+which serves as the userland for our QEMU virtual machine.  
+Using a static BusyBox binary avoids dynamic dependencies (e.g., glibc), 
+making it ideal for minimal and portable kernel testing environments.
+
 \subsection{Compile BusyBox Statically}
+Instead of navigating through \texttt{menuconfig}, we can enable static linking directly 
+by editing the BusyBox configuration file using \texttt{sed}.  
+On modern Ubuntu/Debian systems, you must disable the \texttt{tc} (traffic control) applet 
+to prevent build errors due to missing \texttt{libmnl}.
+
 \begin{lstlisting}[language=bash]
+cd busybox-*
+
+# Start from a default configuration
 make defconfig
-make menuconfig
-# Enable: [*] Build BusyBox as a static binary (no shared libs)
+
+# Enable static build (no menuconfig needed)
+sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+
+# Disable tc applet to avoid dependency errors
+sed -i 's/CONFIG_TC=y/# CONFIG_TC is not set/' .config 2>/dev/null || true
+
+# Build BusyBox statically
 make -j$(nproc)
+
+# Install into a temporary directory
 make install
 \end{lstlisting}
 
 \subsection{Create Initramfs Image}
+We now create a minimal \textbf{initramfs} image containing BusyBox and a basic \texttt{init} script.
+This filesystem will be loaded entirely into memory at boot.
+
 \begin{lstlisting}[language=bash]
+# Create root filesystem structure
 mkdir initramfs
 cd initramfs
-mkdir -pv {bin,sbin,etc,proc,sys,usr/{bin,sbin}}
+mkdir -pv bin sbin etc proc sys usr/bin usr/sbin
+
+# Copy BusyBox binaries and links
 cp -av ../busybox-*/_install/* .
-echo -e '#!/bin/sh\nmount -t proc none /proc\nmount -t sysfs none /sys\nexec /bin/sh' > init
+
+# Minimal init script
+cat << 'EOF' > init
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+exec /bin/sh
+EOF
 chmod +x init
+
+# Package everything into a compressed initramfs
 find . -print0 | cpio --null -ov --format=newc | gzip -9 > ../initramfs.cpio.gz
 \end{lstlisting}
 
-\section{Compiling the Debug-Enabled Kernel}
-\begin{lstlisting}[language=bash]
-cd linux-6.12
-make defconfig
-make menuconfig
-# Disable KASLR, enable DEBUG_INFO, enable BPF_SYSCALL
-make -j$(nproc) bzImage modules
-\end{lstlisting}
 
-\section{Preparing eBPF Tools and Programs}
-\begin{lstlisting}[language=bash]
-cd tools/lib/bpf/
-make -j$(nproc) BUILD_STATIC_ONLY=y
 
-cd ../../bpf/bpftool/
-make -j$(nproc) LDFLAGS="-static"
 
-clang -g -target bpf -D__TARGET_ARCH_x86 -c bpf_prog.c -o bpf_prog.o
-gcc -Wall -static bpf_loader.c -o bpf_loader -lbpf -lz -lelf
-\end{lstlisting}
+\section{Setup the Environment}
 
-\section{Debugging with QEMU and GDB}
-\subsection{Launch QEMU}
+This section guides you through verifying a minimal kernel, setting up a shared folder for host-guest communication, preparing the eBPF environment, and debugging programs using GDB and QEMU.
+
+\subsection{Verify Kernel Boot}
+
+Before doing anything else, ensure that your compiled kernel and initramfs boot correctly.  
+Use a simple QEMU command \textbf{without} the \texttt{-S -s} flags:
+
 \begin{lstlisting}[language=bash]
 qemu-system-x86_64 \
-  -kernel arch/x86/boot/bzImage \
+  -kernel linux-6.12.57/arch/x86/boot/bzImage \
+  -initrd initramfs.cpio.gz \
+  -nographic \
+  -append "console=ttyS0"
+\end{lstlisting}
+
+Inside the VM, test basic commands:
+
+\begin{lstlisting}[language=bash]
+ls /
+ls /proc
+\end{lstlisting}
+
+Once the kernel is responsive and BusyBox works, proceed to the next step.
+
+---
+
+\subsection{Setup Shared Folder Between Host and Guest}
+
+Create a shared folder on the host (at the same level as kernel/initramfs):
+
+\begin{lstlisting}[language=bash]
+mkdir -p shared
+\end{lstlisting}
+
+Launch QEMU with 9p shared folder support (without \texttt{-s -S} for now):
+
+\begin{lstlisting}[language=bash]
+qemu-system-x86_64 \
+  -kernel linux-6.12.57/arch/x86/boot/bzImage \
   -initrd initramfs.cpio.gz \
   -nographic \
   -append "console=ttyS0" \
-  -s -S
+  -virtfs local,path=./shared,mount_tag=host0,security_model=passthrough,id=host0
 \end{lstlisting}
 
-\subsection{Connect GDB}
+Inside the VM, mount the shared folder:
+
 \begin{lstlisting}[language=bash]
-gdb vmlinux
+mkdir -p /mnt/host
+mount -t 9p -o trans=virtio,version=9p2000.L host0 /mnt/host
+cd /mnt/host
+\end{lstlisting}
+
+\textbf{Note:} This setup needs to be repeated after every guest reboot.
+
+---
+
+\subsection{Prepare eBPF Environment}
+
+\subsubsection{Download and Compile libbpf and bpftool}
+
+On the host, clone repositories into the shared folder:
+
+\begin{lstlisting}[language=bash]
+cd shared
+
+# Clone libbpf standalone repository
+git clone https://github.com/libbpf/libbpf.git
+cd libbpf/src
+
+# Compile libbpf statically
+make -j$(nproc) BUILD_STATIC_ONLY=y
+
+# Clone bpftool (recursive for submodules)
+cd ../..
+git clone --recursive https://github.com/libbpf/bpftool.git
+cd bpftool/src
+
+# Compile bpftool statically linking libbpf
+make -j$(nproc) LIBSUBDIRS="tools/lib/bpf" LDFLAGS="-static"
+\end{lstlisting}
+
+\subsubsection{Generate \texttt{vmlinux.h} for Host and Guest}
+
+On the \textbf{host}, generate the kernel BTF header:
+
+\begin{lstlisting}[language=bash]
+./bpftool/src/bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h
+\end{lstlisting}
+
+\textbf{Important:} On the guest, you must regenerate \texttt{vmlinux.h} using the \texttt{bpftool} compiled inside the shared folder:
+
+\begin{lstlisting}[language=bash]
+cd /mnt/host/bpftool/src
+./bpftool btf dump file /sys/kernel/btf/vmlinux format c > ../vmlinux.h
+\end{lstlisting}
+
+This ensures the BTF header matches the running guest kernel.
+
+---
+
+\subsubsection{Compile Minimal BPF Program}
+
+Create a minimal BPF program on the \textbf{host}:
+
+\begin{lstlisting}[language=bash]
+# minimal BPF program using bpf_printk
+echo -e '#include <bpf/bpf_helpers.h>\nint dummy_prog(struct xdp_md *ctx) { bpf_printk("Hello\n"); return 0; }' > test_prog.c
+
+# Compile against vmlinux.h
+clang -O2 -target bpf -g -I. -c test_prog.c -o test_prog.o
+\end{lstlisting}
+
+Test loading with bpftool on the host:
+
+\begin{lstlisting}[language=bash]
+./bpftool/src/bpftool prog load test_prog.o /dev/null
+\end{lstlisting}
+
+\textbf{Note:} We deliberately omit the license to intentionally fail verification — this provides immediate feedback from the kernel.
+
+---
+
+\subsubsection{Move to Guest and Verify Environment}
+
+After verifying on the host, copy all compiled programs and tools into the shared folder.  
+Inside the guest:
+
+\begin{enumerate}
+\item Mount the shared folder:
+
+\begin{lstlisting}[language=bash]
+mkdir -p /mnt/host
+mount -t 9p -o trans=virtio,version=9p2000.L host0 /mnt/host
+cd /mnt/host
+\end{lstlisting}
+
+\item \textbf{Important:} Regenerate \texttt{vmlinux.h} using the guest’s bpftool:
+
+\begin{lstlisting}[language=bash]
+cd bpftool/src
+./bpftool btf dump file /sys/kernel/btf/vmlinux format c > ../vmlinux.h
+\end{lstlisting}
+
+\item \textbf{Note:} Verify that the kernel is responsive and basic commands work:
+
+\begin{lstlisting}[language=bash]
+ls /
+ls /proc
+\end{lstlisting}
+
+\item Compile and test minimal BPF programs.  
+Even if intentionally invalid (e.g., missing license), this ensures the verifier and loader are functional:
+
+\begin{lstlisting}[language=bash]
+clang -O2 -target bpf -g -I. -c test_prog.c -o test_prog.o
+./bpftool/src/bpftool prog load test_prog.o /dev/null
+\end{lstlisting}
+
+\item \textbf{Note:} After each guest reboot, repeat the shared folder mounting and \texttt{vmlinux.h} regeneration before compiling or loading any BPF programs.
+\end{enumerate}
+
+
+\section{Debugging with QEMU and GDB/TUI}
+
+Once loading works on the host and guest:
+
+\begin{enumerate}
+\item Launch QEMU with \texttt{-S} and shared folder support:
+
+\begin{lstlisting}[language=bash]
+qemu-system-x86_64 \
+  -kernel linux-6.12.57/arch/x86/boot/bzImage \
+  -initrd initramfs.cpio.gz \
+  -nographic \
+  -append "console=ttyS0" \
+  -s -S \
+  -virtfs local,path=./shared,mount_tag=host0,security_model=passthrough,id=host0
+\end{lstlisting}
+
+\item Inside the VM, mount the shared folder:
+
+\begin{lstlisting}[language=bash]
+mkdir -p /mnt/host
+mount -t 9p -o trans=virtio,version=9p2000.L host0 /mnt/host
+cd /mnt/host
+\end{lstlisting}
+
+\item Attach GDB from host, with TUI enabled:
+
+\begin{lstlisting}[language=bash]
+gdb -tui vmlinux
 (gdb) target remote :1234
 (gdb) break bpf_check
 (gdb) continue
 \end{lstlisting}
+
+\item Step through BPF verification and kernel execution to inspect behavior.
+\end{enumerate}
+
 
 \end{document}
