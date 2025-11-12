@@ -1,0 +1,101 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=2cm}
+
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\lstset{
+  backgroundcolor=\color{codegray},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single
+}
+
+\title{Debugging the Linux Kernel and eBPF in QEMU (No KVM)}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This guide provides a step-by-step tutorial on how to compile a vanilla Linux kernel,
+create a minimal root filesystem with static BusyBox, and debug the eBPF subsystem
+using QEMU and GDB, without KVM acceleration.
+
+\section{Prerequisites and Setup}
+Ensure the following tools are installed on your host:
+\begin{itemize}
+\item \textbf{Development:} git, gcc, make, flex, bison, libncurses-dev, libssl-dev, bc, libelf-dev, clang, llvm
+\item \textbf{Emulation:} qemu-system-x86\_64
+\item \textbf{Sources:} Linux kernel (e.g.\ 6.12), BusyBox, libbpf/bpftool
+\end{itemize}
+
+\section{Preparing the Minimal Root Filesystem (Initramfs)}
+
+\subsection{Compile BusyBox Statically}
+\begin{lstlisting}[language=bash]
+make defconfig
+make menuconfig
+# Enable: [*] Build BusyBox as a static binary (no shared libs)
+make -j$(nproc)
+make install
+\end{lstlisting}
+
+\subsection{Create Initramfs Image}
+\begin{lstlisting}[language=bash]
+mkdir initramfs
+cd initramfs
+mkdir -pv {bin,sbin,etc,proc,sys,usr/{bin,sbin}}
+cp -av ../busybox-*/_install/* .
+echo -e '#!/bin/sh\nmount -t proc none /proc\nmount -t sysfs none /sys\nexec /bin/sh' > init
+chmod +x init
+find . -print0 | cpio --null -ov --format=newc | gzip -9 > ../initramfs.cpio.gz
+\end{lstlisting}
+
+\section{Compiling the Debug-Enabled Kernel}
+\begin{lstlisting}[language=bash]
+cd linux-6.12
+make defconfig
+make menuconfig
+# Disable KASLR, enable DEBUG_INFO, enable BPF_SYSCALL
+make -j$(nproc) bzImage modules
+\end{lstlisting}
+
+\section{Preparing eBPF Tools and Programs}
+\begin{lstlisting}[language=bash]
+cd tools/lib/bpf/
+make -j$(nproc) BUILD_STATIC_ONLY=y
+
+cd ../../bpf/bpftool/
+make -j$(nproc) LDFLAGS="-static"
+
+clang -g -target bpf -D__TARGET_ARCH_x86 -c bpf_prog.c -o bpf_prog.o
+gcc -Wall -static bpf_loader.c -o bpf_loader -lbpf -lz -lelf
+\end{lstlisting}
+
+\section{Debugging with QEMU and GDB}
+\subsection{Launch QEMU}
+\begin{lstlisting}[language=bash]
+qemu-system-x86_64 \
+  -kernel arch/x86/boot/bzImage \
+  -initrd initramfs.cpio.gz \
+  -nographic \
+  -append "console=ttyS0" \
+  -s -S
+\end{lstlisting}
+
+\subsection{Connect GDB}
+\begin{lstlisting}[language=bash]
+gdb vmlinux
+(gdb) target remote :1234
+(gdb) break bpf_check
+(gdb) continue
+\end{lstlisting}
+
+\end{document}
