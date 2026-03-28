@@ -1,1 +1,219 @@
-Hello World
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rosario Rizza - Portfolio</title>
+    <style>
+        :root {
+            --primary: #0056b3;
+            --bg-color: #f4f7f6;
+            --text-main: #333;
+            --text-muted: #666;
+            --white: #fff;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+        header {
+            background-color: var(--primary);
+            color: var(--white);
+            padding: 3rem 1rem;
+            text-align: center;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+        }
+        header p {
+            font-size: 1.2rem;
+            margin-top: 0.5rem;
+            opacity: 0.9;
+        }
+        .contact-links a {
+            color: var(--white);
+            margin: 0 10px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .contact-links a:hover {
+            text-decoration: underline;
+        }
+        .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+        }
+        section {
+            background: var(--white);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        h2 {
+            color: var(--primary);
+            border-bottom: 2px solid var(--bg-color);
+            padding-bottom: 0.5rem;
+            margin-top: 0;
+        }
+        .item {
+            margin-bottom: 1.5rem;
+        }
+        .item h3 {
+            margin: 0 0 0.2rem 0;
+            font-size: 1.3rem;
+        }
+        .item .meta {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .skills-container span {
+            display: inline-block;
+            background: var(--bg-color);
+            padding: 5px 10px;
+            margin: 4px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            border: 1px solid #ddd;
+        }
+        .pub-link {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .pub-link:hover {
+            text-decoration: underline;
+        }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Rosario Rizza</h1>
+        <p>PhD Student in Computer Engineering</p>
+        <div class="contact-links">
+            <a href="mailto:rosariorizza00@gmail.com">rosariorizza00@gmail.com</a> | 
+            <a href="https://github.com/rosariorizza" target="_blank">GitHub</a> | 
+            <a href="https://www.linkedin.com/in/rosario-rizza-6b0ab11a5" target="_blank">LinkedIn</a> | 
+            <span>Torino (TO)</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <section>
+            <h2>Experience</h2>
+            <div class="item">
+                <h3>PhD Student in Computer Engineering</h3>
+                <div class="meta">Politecnico di Torino, Torino | November 2024 - Ongoing</div>
+                <ul>
+                    <li>Research Focus: Security of Linux Kernel extension (eBPF) with the goal of improving the security and usage of the eBPF subsystem in Linux machines.</li>
+                    <li>Designed and implemented a static analysis tool to improve error reporting for eBPF code, successfully mapping verifier error messages to the original C source code.</li>
+                    <li>Conducted a comprehensive systematic review and statistical analysis of eBPF vulnerabilities (CVEs) from the National Vulnerability Database (2014-2025).</li>
+                    <li>Teaching Assistant: Served as an exercise tutor for the Master's courses "Distributed System Programming" and "Security Verification and Testing" for the 2025/2026 academic year.</li>
+                    <li>European Projects: Active participant in the Horizon Europe research project "ELASTIC" (January 2025 - Ongoing).</li>
+                </ul>
+            </div>
+            
+            <div class="item">
+                <h3>Software Developer</h3>
+                <div class="meta">Alpha Waves, Torino | June 2022 - September 2022</div>
+                <ul>
+                    <li>Developed web applications utilizing Spring framework and Angular.</li>
+                </ul>
+            </div>
+
+            <div class="item">
+                <h3>Stage Software Developer</h3>
+                <div class="meta">Alpha Waves, Torino | March 2022 - June 2022</div>
+                <ul>
+                    <li>Engineered a platform for managing loT devices.</li>
+                    <li>Built the infrastructure using Mosquitto, Paho, Google Cloud, and MongoDB.</li>
+                    <li>Developed the front-end web application using Spring and Angular.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section>
+            <h2>Education</h2>
+            <div class="item">
+                <h3>Master's degree, Computer Engineering - Software</h3>
+                <div class="meta">Politecnico di Torino, Torino | September 2022 - October 2024</div>
+                <p>Grade: 110/110 with honours</p>
+            </div>
+            <div class="item">
+                <h3>Bachelor's degree, Computer Engineering - Young Talent Project</h3>
+                <div class="meta">Politecnico di Torino, Torino | October 2019 - July 2022</div>
+                <p>Grade: 104/110</p>
+            </div>
+            <div class="item">
+                <h3>High School Diploma</h3>
+                <div class="meta">Liceo Scientifico Galileo Galilei, Modica | July 2019</div>
+                <p>Grade: 96/100</p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Publications & Academic Involvement</h2>
+            <ul>
+                <li><strong>Conference Paper:</strong> R. Rizza, R. Sisto and F. Valenza, <a href="https://doi.org/10.1109/csr64739.2025.11130075" class="pub-link" target="_blank">"Design and implementation of a tool to improve error reporting for eBPF code,"</a> 2025 IEEE International Conference on Cyber Security and Resilience (CSR), Chania, Crete, Greece, 2025, pp. 214-219.</li>
+                <li><strong>Conference Paper:</strong> R. Rizza, R. Sisto and F. Valenza, <a href="https://doi.org/10.5281/ZENODO.17711509" class="pub-link" target="_blank">"Analysis of the eBPF Vulnerabilities in the Linux Kernel,"</a> Risks and Security of Internet and Systems (CRISIS 2025), in press.</li>
+                <li><strong>TPC Member:</strong> 2025 IEEE International Conference on Cyber Security and Resilience (CSR).</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Skills</h2>
+            <div class="item">
+                <h3>Programming Languages</h3>
+                <div class="skills-container">
+                    <span>C</span> <span>Java</span> <span>SQL</span> <span>JavaScript</span> <span>TypeScript</span> <span>Rust</span> <span>Kotlin</span> <span>Python</span>
+                </div>
+            </div>
+            <div class="item">
+                <h3>Frameworks & Technologies</h3>
+                <div class="skills-container">
+                    <span>Spring</span> <span>Express</span> <span>Angular</span> <span>React</span> <span>Android development</span> <span>PyTorch</span>
+                </div>
+            </div>
+            <div class="item">
+                <h3>Tools & Methodologies</h3>
+                <div class="skills-container">
+                    <span>Git</span> <span>Jira</span> <span>YouTrack</span> <span>SDLC</span>
+                </div>
+            </div>
+            <div class="item">
+                <h3>Languages</h3>
+                <p>English (7.5 IELTS), Italian (Native)</p>
+            </div>
+        </section>
+        
+        <section>
+            <h2>Volunteering & Awards</h2>
+            <ul>
+                <li><strong>WEEEOpen:</strong> Active member of the University Student Association.</li>
+                <li><strong>Practical Experience:</strong> Worked as a sound technician and electrician with family business.</li>
+                <li><strong>Creative Writing Award:</strong> 54° Edizione del Convegno internazionale di studi pirandelliani - Scrittura creativa (Pirandello's International Convention).</li>
+            </ul>
+        </section>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Rosario Rizza. Designed for GitHub Pages.</p>
+    </footer>
+
+</body>
+</html>
